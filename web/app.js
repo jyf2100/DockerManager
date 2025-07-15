@@ -238,17 +238,25 @@ class ContainerManager {
      * 获取Docker统计信息
      */
     async fetchDockerStats() {
+        const fetchWithCheck = async (url) => {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        };
+
         const [containers, images, networks, volumes] = await Promise.all([
-            fetch(`${this.apiBase}/docker/containers?all=true`).then(r => r.json()),
-            fetch(`${this.apiBase}/docker/images`).then(r => r.json()),
-            fetch(`${this.apiBase}/docker/networks`).then(r => r.json()),
-            fetch(`${this.apiBase}/docker/volumes`).then(r => r.json())
+            fetchWithCheck(`${this.apiBase}/docker/containers?all=true`),
+            fetchWithCheck(`${this.apiBase}/docker/images`),
+            fetchWithCheck(`${this.apiBase}/docker/networks`),
+            fetchWithCheck(`${this.apiBase}/docker/volumes`)
         ]);
 
         return {
             containers: {
                 total: containers.length,
-                running: containers.filter(c => c.State === 'running').length
+                running: containers.filter(c => c.status === 'running').length
             },
             images: {
                 total: images.length,
@@ -267,6 +275,9 @@ class ContainerManager {
      */
     async fetchSystemInfo() {
         const response = await fetch('/info');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
         return await response.json();
     }
 
@@ -364,8 +375,14 @@ class ContainerManager {
             }
 
             tbody.innerHTML = containers.map(container => {
+                // 验证容器对象
+                if (!container || typeof container !== 'object') {
+                    console.warn('无效的容器对象:', container);
+                    return '';
+                }
+                
                 // 安全地获取容器名称
-                const containerName = container.name || container.id?.substring(0, 12) || '未知';
+                const containerName = container.name || (container.id && typeof container.id === 'string' && container.id.length > 12 ? container.id.substring(0, 12) : container.id) || '未知';
                 const containerId = container.id || '';
                 const containerImage = container.image || '未知';
                 const containerState = container.status || 'unknown';
@@ -450,6 +467,12 @@ class ContainerManager {
             }
 
             tbody.innerHTML = images.map(image => {
+                // 验证镜像对象
+                if (!image || typeof image !== 'object') {
+                    console.warn('无效的镜像对象:', image);
+                    return '';
+                }
+                
                 const repoTags = image.tags || ['<none>:<none>'];
                 // 安全地处理标签分割
                 const firstTag = repoTags[0] || '<none>:<none>';
@@ -464,7 +487,7 @@ class ContainerManager {
                     <tr>
                         <td><strong>${repository || '未知'}</strong></td>
                         <td>${tag || '未知'}</td>
-                        <td><code>${imageId ? imageId.substring(7, 19) : '未知'}</code></td>
+                        <td><code>${imageId && imageId.length > 19 ? imageId.substring(7, 19) : (imageId || '未知')}</code></td>
                         <td>${this.formatBytes(imageSize)}</td>
                         <td>${this.formatDate(imageCreated)}</td>
                         <td>

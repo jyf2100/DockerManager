@@ -197,8 +197,8 @@ async def system_info():
             docker_info = docker_manager.get_system_info()
             info["services"]["docker"] = {
                 "status": "connected",
-                "version": docker_info.get("ServerVersion", "unknown"),
-                "api_version": docker_info.get("ApiVersion", "unknown")
+                "version": docker_info.get("server_version", "unknown"),
+                "api_version": docker_info.get("api_version", "unknown")
             }
         except Exception as e:
             info["services"]["docker"] = {
@@ -208,11 +208,13 @@ async def system_info():
         
         # Kubernetes信息
         try:
-            k8s_manager = K8sManager()
+            from ..common.config import ConfigManager
+            config_mgr = ConfigManager()
+            k8s_manager = K8sManager(config_mgr)
             cluster_info = k8s_manager.get_cluster_info()
             info["services"]["kubernetes"] = {
                 "status": "connected",
-                "version": cluster_info.get("server_version", "unknown"),
+                "version": cluster_info.get("version", {}).get("git_version", "unknown"),
                 "current_namespace": k8s_manager.current_namespace
             }
         except Exception as e:
@@ -223,7 +225,7 @@ async def system_info():
         
         # 配置信息（隐藏敏感信息）
         if config_manager:
-            config = config_manager.get_all()
+            config = config_manager.config
             safe_config = {
                 "api": config.get("api", {}),
                 "logging": {
