@@ -1,0 +1,177 @@
+version: '3.8'
+
+services:
+  # 容器生命周期管理API服务
+  docker-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docker-manager-api
+    ports:
+      - "8001:8000"
+    volumes:
+      # 挂载Docker socket以管理本地容器
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 挂载配置文件
+      - ./config:/app/config
+      # 挂载日志目录
+      - ./logs:/app/logs
+      # 挂载数据目录
+      - ./data:/app/data
+      # 开发模式：挂载源代码
+      - ./src:/app/src
+      # 挂载kubeconfig文件以访问Kubernetes集群
+      - ~/.kube:/app/.kube:ro
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    networks:
+      - docker-manager-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - redis
+      - postgres
+
+  # Redis缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: docker-manager-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - docker-manager-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL数据库服务
+  postgres:
+    image: postgres:15-alpine
+    container_name: docker-manager-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=docker_manager
+      - POSTGRES_USER=docker_manager
+      - POSTGRES_PASSWORD=docker_manager_password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - docker-manager-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docker_manager -d docker_manager"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: docker-manager-nginx
+    ports:
+      - "80:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./logs/nginx:/var/log/nginx
+      # 挂载Web界面文件
+      - ./web:/usr/share/nginx/html/web
+    networks:
+      - docker-manager-network
+    restart: unless-stopped
+    depends_on:
+      - docker-manager
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://docker-manager:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: docker-manager-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - docker-manager-network
+    restart: unless-stopped
+
+  # Grafana可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: docker-manager-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - docker-manager-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # Jaeger链路追踪
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: docker-manager-jaeger
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - docker-manager-network
+    restart: unless-stopped
+
+networks:
+  docker-manager-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.24.0.0/16
+
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

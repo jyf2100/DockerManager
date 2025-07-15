@@ -1,0 +1,49 @@
+# Docker Manager 配置文件示例
+
+# Docker配置
+docker:
+  # Docker守护进程连接配置
+  base_url: "unix://var/run/docker.sock"  # Linux/Mac默认socket路径
+  # base_url: "tcp://localhost:2376"      # TCP连接示例
+  timeout: 60
+  tls: false
+  
+# Kubernetes配置
+kubernetes:
+  # 集群配置列表
+  clusters:
+    - name: "local-cluster"
+      config_file: "~/.kube/config"  # kubeconfig文件路径
+      context: ""  # 留空使用默认context
+      namespace: "default"  # 默认命名空间
+    - name: "prod-cluster"
+      config_file: "/path/to/prod-kubeconfig"
+      context: "prod-context"
+      namespace: "production"
+  
+  # 默认使用的集群
+  default_cluster: "local-cluster"
+
+# API服务配置
+api:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+  reload: true
+
+# 日志配置
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/docker_manager.log"
+  max_size: "10MB"
+  backup_count: 5
+
+# 监控配置
+monitoring:
+  # 资源监控间隔（秒）
+  interval: 30
+  # 是否启用监控
+  enabled: true
+  # 监控指标保留时间（小时）
+  retention_hours: 24
